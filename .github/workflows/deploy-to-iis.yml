@@ -1,0 +1,60 @@
+name: Build and Deploy to IIS
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-and-deploy:
+    runs-on: [self-hosted, Windows, iis]
+
+    env:
+      PROJECT_PATH: azure-devops/SourceCode_Deploy_To_IIS_Server/SampleWebApp/SampleWebApp/SampleWebApp.csproj
+      TEST_PATH: azure-devops/SourceCode_Deploy_To_IIS_Server/SampleWebApp/SampleWebApp.Tests/SampleWebApp.Tests.csproj
+      PUBLISH_DIR: C:\deploy\publish
+      IIS_SITE_PATH: C:\inetpub\SampleWebApp
+      APP_POOL: SampleWebAppPool
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 6
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '6.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore ${{ env.PROJECT_PATH }}
+
+      - name: Build
+        run: dotnet build ${{ env.PROJECT_PATH }} --configuration Release --no-restore
+
+      - name: Run tests
+        run: dotnet test ${{ env.TEST_PATH }} --configuration Release --no-build --verbosity normal
+        continue-on-error: false
+
+      - name: Publish
+        run: dotnet publish ${{ env.PROJECT_PATH }} --configuration Release --output ${{ env.PUBLISH_DIR }} --no-build
+
+      - name: Stop IIS App Pool
+        run: |
+          Import-Module WebAdministration
+          Stop-WebAppPool -Name "${{ env.APP_POOL }}"
+          Start-Sleep -Seconds 2
+        shell: powershell
+
+      - name: Deploy to IIS
+        run: |
+          Remove-Item -Path "${{ env.IIS_SITE_PATH }}\*" -Recurse -Force -ErrorAction SilentlyContinue
+          Copy-Item -Path "${{ env.PUBLISH_DIR }}\*" -Destination "${{ env.IIS_SITE_PATH }}" -Recurse -Force
+          Write-Host "Deployed to ${{ env.IIS_SITE_PATH }}"
+        shell: powershell
+
+      - name: Start IIS App Pool
+        run: |
+          Import-Module WebAdministration
+          Start-WebAppPool -Name "${{ env.APP_POOL }}"
+          Write-Host "App pool started. Site available at http://localhost:8080"
+        shell: powershell
